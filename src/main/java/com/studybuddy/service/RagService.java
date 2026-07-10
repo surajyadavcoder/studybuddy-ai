@@ -13,24 +13,23 @@ public class RagService {
     private final VectorStoreService vectorStoreService;
     private final EmbeddingService embeddingService;
     private final WebClient webClient;
+    private final String apiKey;
 
-    @Value("${app.ollama.chat-model}")
+    @Value("${app.groq.chat-model}")
     private String chatModel;
 
     public RagService(VectorStoreService vectorStoreService,
-                       EmbeddingService embeddingService,
-                       @Value("${app.ollama.base-url}") String baseUrl) {
+                      EmbeddingService embeddingService,
+                      @Value("${app.groq.base-url}") String baseUrl,
+                      @Value("${app.groq.api-key}") String apiKey) {
         this.vectorStoreService = vectorStoreService;
         this.embeddingService = embeddingService;
+        this.apiKey = apiKey;
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .build();
     }
 
-    /**
-     * Answers a user's question by retrieving relevant chunks from their documents
-     * and passing them to the local LLM as context.
-     */
     public String answerQuestion(String question, List<Long> documentIds) {
         float[] queryEmbedding = embeddingService.embed(question);
         List<String> relevantChunks = vectorStoreService.findSimilarChunks(queryEmbedding, documentIds, 5);
@@ -62,19 +61,21 @@ public class RagService {
         );
 
         Map<String, Object> response = webClient.post()
-                .uri("/api/chat")
+                .uri("/chat/completions")
                 .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(Map.class)
                 .block();
 
-        if (response == null || !response.containsKey("message")) {
-            throw new RuntimeException("Ollama chat API returned an unexpected response. "
-                    + "Make sure Ollama is running and the model has been pulled.");
+        if (response == null || !response.containsKey("choices")) {
+            throw new RuntimeException("Groq chat API returned an unexpected response. "
+                    + "Check that your Groq API key is set correctly.");
         }
 
-        Map<String, Object> message = (Map<String, Object>) response.get("message");
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
+        Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
         return (String) message.get("content");
     }
 }

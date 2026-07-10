@@ -19,22 +19,22 @@ public class QuizGenerationService {
     private final JdbcTemplate jdbcTemplate;
     private final QuizRepository quizRepository;
     private final WebClient webClient;
+    private final String apiKey;
 
-    @Value("${app.ollama.chat-model}")
+    @Value("${app.groq.chat-model}")
     private String chatModel;
 
     public QuizGenerationService(JdbcTemplate jdbcTemplate, QuizRepository quizRepository,
-                                  @Value("${app.ollama.base-url}") String baseUrl) {
+                                 @Value("${app.groq.base-url}") String baseUrl,
+                                 @Value("${app.groq.api-key}") String apiKey) {
         this.jdbcTemplate = jdbcTemplate;
         this.quizRepository = quizRepository;
+        this.apiKey = apiKey;
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .build();
     }
 
-    /**
-     * Generates a set of quiz questions from a document's stored chunks and saves them.
-     */
     @SuppressWarnings("unchecked")
     public List<Quiz> generateQuizForDocument(Long documentId, int numberOfQuestions) {
         List<String> chunks = jdbcTemplate.queryForList(
@@ -70,19 +70,21 @@ public class QuizGenerationService {
         );
 
         Map<String, Object> response = webClient.post()
-                .uri("/api/chat")
+                .uri("/chat/completions")
                 .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(Map.class)
                 .block();
 
-        if (response == null || !response.containsKey("message")) {
-            throw new RuntimeException("Ollama chat API returned an unexpected response. "
-                    + "Make sure Ollama is running and the model has been pulled.");
+        if (response == null || !response.containsKey("choices")) {
+            throw new RuntimeException("Groq chat API returned an unexpected response. "
+                    + "Check that your Groq API key is set correctly.");
         }
 
-        Map<String, Object> message = (Map<String, Object>) response.get("message");
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
+        Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
         String rawText = (String) message.get("content");
 
         List<Quiz> quizzes = parseQuizzesFromText(rawText, documentId);
